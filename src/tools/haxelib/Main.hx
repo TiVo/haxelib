@@ -936,10 +936,14 @@ class Main {
 	}
 
 	function getRepository( ?setup : Bool ) {
+		return getRepositories(setup).pop();
+	}
+
+	function getRepositories( ?setup : Bool ) {
 
 		if( !setup && !settings.global && FileSystem.exists(REPODIR) && FileSystem.isDirectory(REPODIR) ) {
 			var absolutePath = Path.join([cli.cwd, REPODIR]);//TODO: we actually might want to get the real path here
-			return Path.addTrailingSlash(absolutePath);
+			return [Path.addTrailingSlash(absolutePath)];
 		}
 
 		var win = Sys.systemName() == "Windows";
@@ -977,11 +981,13 @@ class Main {
 				} catch( e : String ) {
 					throw "Error accessing Haxelib repository: $e";
 				}
-				return Path.addTrailingSlash( rep );
+				return [Path.addTrailingSlash( rep )];
 			} else
 				throw "This is the first time you are runing haxelib. Please run `haxelib setup` first";
 		}
 		rep = rep.trim();
+		var reps = rep.split(":");
+		rep = reps.pop();
 		if( setup ) {
 			if( args.length <= argcur ) {
 				print("Please enter haxelib repository path with write access");
@@ -1006,7 +1012,13 @@ class Main {
 		} else if ( !FileSystem.isDirectory(rep) ) {
 			throw "haxelib Repository "+rep+" exists, but was a file, not a directory.  Please remove it and run `haxelib setup` again.";
 		}
-		return rep+"/";
+
+		var ret = [];
+		for (r in reps) {
+			ret.push(r + "/");
+		}
+		ret.push(rep + "/");
+		return ret;
 	}
 
 	function setup() {
@@ -1300,28 +1312,43 @@ class Main {
 		print("Library "+prj+" current version is now "+version);
 	}
 
+	function hasLib(dir) {
+		return (FileSystem.exists(dir))
+			&& (FileSystem.exists(dir + "/.dev")
+			|| (FileSystem.exists(dir + "/.current")));
+	}
+
 	function checkRec( prj : String, version : String, l : List<{ project : String, version : String, info : Infos }> ) {
-		var pdir = getRepository() + Data.safe(prj);
-		if( !FileSystem.exists(pdir) )
-			throw "Library "+prj+" is not installed : run 'haxelib install "+prj+"'";
-		var version = if( version != null ) version else getCurrent(pdir);
-		var vdir = pdir + "/" + Data.safe(version);
-		if( vdir.endsWith("dev") )
-			vdir = getDev(pdir);
-		if( !FileSystem.exists(vdir) )
-			throw "Library "+prj+" version "+version+" is not installed";
-		for( p in l )
-			if( p.project == prj ) {
-				if( p.version == version )
-					return;
-				throw "Library "+prj+" has two version included "+version+" and "+p.version;
+		var reps = getRepositories();
+		var found = false;
+		for (rep in reps) {
+			var pdir = rep + "/" + Data.safe(prj);
+			if ( !hasLib(pdir) ) {
+				continue;
 			}
-		var json = try File.getContent(vdir+"/"+Data.JSON) catch( e : Dynamic ) null;
-		var inf = Data.readData(json,false);
-		l.add({ project : prj, version : version, info: inf });
-		for( d in inf.dependencies )
-			if( !Lambda.exists(l, function(e) return e.project == d.name) )
-				checkRec(d.name,if( d.version == "" ) null else d.version,l);
+
+			found = true;
+			var version = if( version != null ) version else getCurrent(pdir);
+			var vdir = pdir + "/" + Data.safe(version);
+			if( vdir.endsWith("dev") )
+				vdir = getDev(pdir);
+			if( !FileSystem.exists(vdir) )
+				throw "Library "+prj+" version "+version+" is not installed";
+			for( p in l )
+				if( p.project == prj ) {
+					if( p.version == version )
+						return;
+					throw "Library "+prj+" has two version included "+version+" and "+p.version;
+				}
+			var json = try File.getContent(vdir+"/"+Data.JSON) catch( e : Dynamic ) null;
+			var inf = Data.readData(json,false);
+			l.add({ project : prj, version : version, info: inf });
+			for( d in inf.dependencies )
+				if( !Lambda.exists(l, function(e) return e.project == d.name) )
+					checkRec(d.name,if( d.version == "" ) null else d.version,l);
+		}
+		if( !found )
+			throw "Library "+prj+" is not installed : run 'haxelib install "+prj+"'";
 	}
 
 	function path() {
