@@ -1,0 +1,16 @@
+#
+# File: build.hxml
+#
+# Copyright 2014 TiVo Inc. All Rights Reserved.
+#
+######################################################################
+
+# builds haxelib neko tool
+
+-cmd mkdir -p %OBJDIR%
+
+--next
+-D tivo
+-cp src
+-neko %OBJDIR%/haxelib.n
+-main tools.haxelib.Main
