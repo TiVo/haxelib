@@ -63,7 +63,7 @@ abstract DependencyVersion(String) to String from SemVer {
 			else @:privateAccess new SemVer(this);
 
 	static public function isValid(s:String)
-		return toValidatable(s).validate() == None;
+		return new DependencyVersion(s).toValidatable().validate() == None;
 
 	static public var DEFAULT(default, null) = new DependencyVersion('');
 }
