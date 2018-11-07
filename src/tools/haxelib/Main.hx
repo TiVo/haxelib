@@ -290,6 +290,7 @@ class Main {
 		addCommand("user", user, "list information on a given user", Information);
 		addCommand("config", config, "print the repository path", Information, false);
 		addCommand("path", path, "give paths to libraries", Information, false);
+		addCommand("list-path", listPath, "give paths to all installed libraries", Information, false);
 		addCommand("version", version, "print the currently using haxelib version", Information, false);
 		addCommand("help", usage, "display this list of options", Information, false);
 
@@ -463,6 +464,11 @@ class Main {
 		if( cmd == null ) {
 			usage();
 			Sys.exit(1);
+		}
+		// Allow "test" as an alias for "local" temporarily
+		if (cmd == "test") {
+			print("WARNING: 'test' is a deprecated command; use 'local' instead.");
+			cmd = "local";
 		}
 		for( c in commands )
 			if( c.name == cmd ) {
@@ -935,11 +941,17 @@ class Main {
 		}
 	}
 
+    // Returns the main repository, which is the last repository listed in the
+    // colon-separated list of repositories extracted from the environment
 	function getRepository( ?setup : Bool ) {
+        return getRepositories( setup ).pop( );
+    }
 
+    // Returns the respository list, with the main repository last
+	function getRepositories( ?setup : Bool ) {
 		if( !setup && !settings.global && FileSystem.exists(REPODIR) && FileSystem.isDirectory(REPODIR) ) {
 			var absolutePath = Path.join([cli.cwd, REPODIR]);//TODO: we actually might want to get the real path here
-			return Path.addTrailingSlash(absolutePath);
+			return [ Path.addTrailingSlash(absolutePath) ];
 		}
 
 		var win = Sys.systemName() == "Windows";
@@ -977,11 +989,13 @@ class Main {
 				} catch( e : String ) {
 					throw "Error accessing Haxelib repository: $e";
 				}
-				return Path.addTrailingSlash( rep );
+				return [ Path.addTrailingSlash( rep ) ];
 			} else
 				throw "This is the first time you are runing haxelib. Please run `haxelib setup` first";
 		}
 		rep = rep.trim();
+        var reps = rep.split(":");
+        rep = reps.pop();
 		if( setup ) {
 			if( args.length <= argcur ) {
 				print("Please enter haxelib repository path with write access");
@@ -1006,7 +1020,12 @@ class Main {
 		} else if ( !FileSystem.isDirectory(rep) ) {
 			throw "haxelib Repository "+rep+" exists, but was a file, not a directory.  Please remove it and run `haxelib setup` again.";
 		}
-		return rep+"/";
+        var ret = new Array();
+        for (r in reps) {
+            ret.push(r + "/");
+        }
+        ret.push(rep + "/");
+		return ret;
 	}
 
 	function setup() {
@@ -1027,12 +1046,22 @@ class Main {
 	}
 
 	function list() {
+		listImpl();
+	}
+
+	function listPath() {
+		listImpl(true);
+	}
+
+	function listImpl(?isListPathCmd : Bool = false) {
 		var rep = getRepository();
 		var folders = FileSystem.readDirectory(rep);
 		var filter = paramOpt();
 		if ( filter != null )
 			folders = folders.filter( function (f) return f.toLowerCase().indexOf(filter.toLowerCase()) > -1 );
 		var all = [];
+		var list : List<{ rep : String, project : String, version : String, info : Infos }> = 
+				new List<{ rep : String, project : String, version : String, info : Infos }>();
 		for( p in folders ) {
 			if( p.charAt(0) == "." )
 				continue;
@@ -1049,8 +1078,19 @@ class Main {
 			}
 			if( dev != null )
 				versions.push("[dev:"+dev+"]");
-			all.push(Data.unsafe(p) + ": "+versions.join(" "));
+			if (isListPathCmd) {
+				checkRec(Data.unsafe(p),null,list);
+			}
+			else {
+				all.push(Data.unsafe(p) + ": "+versions.join(" "));
+			}
 		}
+
+		if (isListPathCmd) {
+			pathImpl(list, true);
+			return;
+		}
+
 		all.sort(function(s1, s2) return Reflect.compare(s1.toLowerCase(), s2.toLowerCase()));
 		for (p in all) {
 			print(p);
@@ -1259,8 +1299,9 @@ class Main {
 		var rep = getRepository();
 		var pdir = rep + Data.safe(prj);
 		if( version == null ) {
-			if( !FileSystem.exists(pdir) )
+			if( !FileSystem.exists(pdir) ) {
 				throw "Library "+prj+" is not installed";
+            }
 			deleteRec(pdir);
 			print("Library "+prj+" removed");
 			return;
@@ -1300,38 +1341,57 @@ class Main {
 		print("Library "+prj+" current version is now "+version);
 	}
 
-	function checkRec( prj : String, version : String, l : List<{ project : String, version : String, info : Infos }> ) {
-		var pdir = getRepository() + Data.safe(prj);
-		if( !FileSystem.exists(pdir) )
-			throw "Library "+prj+" is not installed : run 'haxelib install "+prj+"'";
+    function checkRec( prj : String, version : String, l : List<{ rep : String, project : String, version : String, info : Infos }> ) {
+        var reps = getRepositories();
+        var found = false;
+        for (rep in reps) {
+		    var pdir = rep + Data.safe(prj);
+                if( !FileSystem.exists(pdir) ) {
+                    continue;
+                }
+                found = true;
 		var version = if( version != null ) version else getCurrent(pdir);
 		var vdir = pdir + "/" + Data.safe(version);
 		if( vdir.endsWith("dev") )
 			vdir = getDev(pdir);
 		if( !FileSystem.exists(vdir) )
 			throw "Library "+prj+" version "+version+" is not installed";
-		for( p in l )
+		for( p in l ) {
 			if( p.project == prj ) {
 				if( p.version == version )
 					return;
 				throw "Library "+prj+" has two version included "+version+" and "+p.version;
 			}
+				}
 		var json = try File.getContent(vdir+"/"+Data.JSON) catch( e : Dynamic ) null;
+#if 0
+		if( json == null )
+			return; // ignore missing haxelib.json, assume no dependencies
+#end
 		var inf = Data.readData(json,false);
-		l.add({ project : prj, version : version, info: inf });
+		l.add({ rep : rep, project : prj, version : version, info: inf });
 		for( d in inf.dependencies )
 			if( !Lambda.exists(l, function(e) return e.project == d.name) )
 				checkRec(d.name,if( d.version == "" ) null else d.version,l);
 	}
+        if (!found) {
+            throw "Library "+prj+" is not installed : run 'haxelib install "+prj+"'";
+        }
+	}
 
 	function path() {
-		var list = new List();
+		var list = new List<{ rep : String, project : String, version : String, info : Infos }>();
 		while( argcur < args.length ) {
 			var a = args[argcur++].split(":");
 			checkRec(a[0],a[1],list);
 		}
-		var rep = getRepository();
+		pathImpl(list);
+	}
+
+	function pathImpl(list : List<{ rep : String, project : String, version : String, info : Infos }>,
+						?isListPathCmd : Bool = false) {
 		for( d in list ) {
+            var rep = d.rep;
 			var pdir = Data.safe(d.project)+"/"+Data.safe(d.version)+"/";
 			var dir = rep + pdir;
 			try {
@@ -1339,25 +1399,31 @@ class Main {
 				dir = Path.addTrailingSlash(dir);
 				pdir = dir;
 			} catch( e : Dynamic ) {}
+		 if (! isListPathCmd) {
 			var ndir = dir + "ndll";
 			if( FileSystem.exists(ndir) ) {
 				var sysdir = ndir+"/"+Sys.systemName();
 				var is64 = neko.Lib.load("std", "sys_is64", 0)();
 				if( is64 ) sysdir += "64";
-				// if( !FileSystem.exists(sysdir) )
-				//	throw "Library "+d.project+" version "+d.version+" does not have a neko dll for your system";
-				Sys.println("-L "+pdir+"ndll/");
+                Sys.println("-L "+pdir+"ndll/");
 			}
 			try {
 				var f = File.getContent(dir + "extraParams.hxml");
 				Sys.println(f.trim());
 			} catch( e : Dynamic ) {}
+		 }
 			if (d.info.classPath != "") {
 				var cp = d.info.classPath;
 				dir = Path.addTrailingSlash( dir + cp );
 			}
+
+		 if (isListPathCmd) {
+			Sys.println(d.project + ":" + Data.safe(d.version) + ":" + dir);
+		 }
+         else {
 			Sys.println(dir);
 			Sys.println("-D " + d.project + "="+d.info.version);
+         }
 		}
 	}
 
@@ -1498,8 +1564,9 @@ class Main {
 		var temp = project.split(":");
 		project = temp[0];
 		var pdir = rep + Data.safe(project);
-		if( !FileSystem.exists(pdir) )
+		if( !FileSystem.exists(pdir) ) {
 			throw "Library "+project+" is not installed";
+        }
 		pdir += "/";
 		var version = temp[1] != null ? temp[1] : getCurrent(pdir);
 		var dev = try getDev(pdir) catch ( e : Dynamic ) null;
