@@ -1341,7 +1341,7 @@ class Main {
 		print("Library "+prj+" current version is now "+version);
 	}
 
-	function checkRec( prj : String, version : String, l : List<{ rep : String, project : String, version : String, info : Infos }> ) {
+	function checkRec( prj : String, requestedVersion : String, l : List<{ rep : String, project : String, version : String, info : Infos }> ) {
 		var reps = getRepositories();
 		var found = false;
 		for (rep in reps) {
@@ -1349,9 +1349,9 @@ class Main {
 			if( !FileSystem.exists(pdir) ) {
 				continue;
 			}
-			var currentVersion;
+			var version;
 			try {
-				currentVersion = version != null ? version : getCurrent(pdir);
+				version = requestedVersion != null ? requestedVersion : getCurrent(pdir);
 			} catch(e:Dynamic) {
 				print("No .current file for haxelib dir " + rep + " for haxelib " + prj);
 				continue;
