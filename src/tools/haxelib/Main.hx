@@ -1341,42 +1341,51 @@ class Main {
 		print("Library "+prj+" current version is now "+version);
 	}
 
-    function checkRec( prj : String, version : String, l : List<{ rep : String, project : String, version : String, info : Infos }> ) {
-        var reps = getRepositories();
-        var found = false;
-        for (rep in reps) {
-		    var pdir = rep + Data.safe(prj);
-                if( !FileSystem.exists(pdir) ) {
-                    continue;
-                }
-                found = true;
-		var version = if( version != null ) version else getCurrent(pdir);
-		var vdir = pdir + "/" + Data.safe(version);
-		if( vdir.endsWith("dev") )
-			vdir = getDev(pdir);
-		if( !FileSystem.exists(vdir) )
-			throw "Library "+prj+" version "+version+" is not installed";
-		for( p in l ) {
-			if( p.project == prj ) {
-				if( p.version == version )
-					return;
-				throw "Library "+prj+" has two version included "+version+" and "+p.version;
+	function checkRec( prj : String, version : String, l : List<{ rep : String, project : String, version : String, info : Infos }> ) {
+		var reps = getRepositories();
+		var found = false;
+		for (rep in reps) {
+			var pdir = rep + Data.safe(prj);
+			if( !FileSystem.exists(pdir) ) {
+				continue;
 			}
+			var currentVersion;
+			try {
+				currentVersion = version != null ? version : getCurrent(pdir);
+			} catch(e:Dynamic) {
+				print("No .current file for haxelib dir " + rep + " for haxelib " + prj);
+				continue;
+			};
+
+
+			var vdir = pdir + "/" + Data.safe(version);
+			if( vdir.endsWith("dev") )
+				vdir = getDev(pdir);
+			if( !FileSystem.exists(vdir) ) {
+				print("Library "+prj+" version "+version+" is not installed in " + rep);
+				continue;
+
+			}
+			for( p in l ) {
+				if( p.project == prj ) {
+					if( p.version == version )
+						return;
+					throw "Library "+prj+" has two version included "+version+" and "+p.version;
 				}
-		var json = try File.getContent(vdir+"/"+Data.JSON) catch( e : Dynamic ) null;
-#if 0
-		if( json == null )
-			return; // ignore missing haxelib.json, assume no dependencies
-#end
-		var inf = Data.readData(json,false);
-		l.add({ rep : rep, project : prj, version : version, info: inf });
-		for( d in inf.dependencies )
-			if( !Lambda.exists(l, function(e) return e.project == d.name) )
-				checkRec(d.name,if( d.version == "" ) null else d.version,l);
-	}
-        if (!found) {
-            throw "Library "+prj+" is not installed : run 'haxelib install "+prj+"'";
-        }
+			}
+			var json = try File.getContent(vdir+"/"+Data.JSON) catch( e : Dynamic ) null;
+
+			var inf = Data.readData(json,false);
+			l.add({ rep : rep, project : prj, version : version, info: inf });
+			for( d in inf.dependencies )
+				if( !Lambda.exists(l, function(e) return e.project == d.name) )
+					checkRec(d.name,if( d.version == "" ) null else d.version,l);
+
+			found = true;
+		}
+		if (!found) {
+			throw "Library "+prj+" is not installed : run 'haxelib install "+prj+"'";
+		}
 	}
 
 	function path() {
